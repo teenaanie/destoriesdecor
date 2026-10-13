@@ -150,7 +150,7 @@
       </div>
       <div class="shop-body">
         <aside class="filters" aria-label="Filters">
-          <details class="filters-box" open><summary>Filters ${active ? `<span class="fcount">${active}</span>` : ''}</summary>
+          <details class="filters-box" ${innerWidth > 900 || active ? 'open' : ''}><summary>Filters ${active ? `<span class="fcount">${active}</span>` : ''}</summary>
           <div class="fgroup"><label class="flabel" for="fq">Search</label><input id="fq" type="search" value="${e(filters.q)}" placeholder="Name or material"></div>
           ${chipGroup('Category', [['', 'All']].concat(S.visibleCats().map(c => [c.id, c.name])), filters.cat)}
           ${chipGroup('Room', [['', 'Any room']].concat(ROOMS), filters.room)}
