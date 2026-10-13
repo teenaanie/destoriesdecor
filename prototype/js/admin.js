@@ -6,7 +6,7 @@
   const ui = { range: 30, topBy: 'units', orderStatus: 'all', orderQ: '', prodQ: '', prodCat: '', prodStock: '', invQ: '', invOnly: false, custQ: '', custSort: 'spend', enqStatus: 'all' };
   let charts = [];
   const admins = () => (S.db.settings.admins || (S.db.settings.admins = window.DEFAULT_ADMINS.slice())).map(x => x.toLowerCase());
-  const STATUS = { pending: 'Pending', confirmed: 'Confirmed', shipped: 'Shipped', delivered: 'Delivered', cancelled: 'Cancelled' };
+  const STATUS = { pending: 'Pending', confirmed: 'Confirmed', shipped: 'Dispatched', delivered: 'Delivered', cancelled: 'Cancelled', abandoned: 'Abandoned' };
   const ENQ = { new: 'New', contacted: 'Contacted', site_visit: 'Site visit', quoted: 'Quoted', won: 'Won', lost: 'Lost' };
   const REASON = { order: 'Order confirmed', cancel: 'Order cancelled', restock: 'Restock', store_sale: 'Store sale', damage: 'Damaged', adjust: 'Count adjusted' };
   const pill = s => `<span class="pill s-${s}">${STATUS[s] || ENQ[s] || s}</span>`;
@@ -83,6 +83,7 @@
         <section class="panel"><div class="p-head"><h2>Needs attention</h2></div>
           <div class="attn">
             <a href="#admin-orders" class="attn-row" data-status="pending"><span class="attn-n">${S.db.orders.filter(o => o.status === 'pending').length}</span><span>orders waiting for you to confirm on WhatsApp</span></a>
+            ${S.db.orders.filter(S.isStale).length ? `<a href="#admin-orders" class="attn-row warn" data-status="pending"><span class="attn-n">${S.db.orders.filter(S.isStale).length}</span><span>pending orders with no reply for 3+ days, likely abandoned</span></a>` : ''}
             <a href="#admin-inventory" class="attn-row warn"><span class="attn-n">${S.restockList().length}</span><span>sizes are low or out of stock</span></a>
             <a href="#admin-enquiries" class="attn-row"><span class="attn-n">${S.db.enquiries.filter(x => x.status === 'new').length}</span><span>new studio enquiries</span></a>
           </div>
@@ -162,7 +163,7 @@
     const body = `<div class="toolbar"><div class="tabs" role="group" aria-label="Status">${[['all', 'All', S.db.orders.length]].concat(Object.entries(STATUS).map(([k, v]) => [k, v, counts[k]])).map(t => `<button data-os="${t[0]}" class="${ui.orderStatus === t[0] ? 'on' : ''}">${t[1]} <span>${t[2]}</span></button>`).join('')}</div>
       <input id="o-q" type="search" class="search" placeholder="Order no., name or phone" value="${e(ui.orderQ)}" aria-label="Search orders"></div>
       <div class="table-wrap"><table class="tbl"><thead><tr><th>Order</th><th>Date</th><th>Customer</th><th>Items</th><th class="r">Total</th><th>Status</th><th>Channel</th></tr></thead><tbody>
-      ${shown.map(o => { const c = S.customer(o.cid); return `<tr data-href="#admin-order-${o.number}"><td><a href="#admin-order-${o.number}"><b>${o.number}</b></a></td><td>${S.fmtDate(o.created, { day: 'numeric', month: 'short' })}</td><td>${e(c.name)}<small>${e(c.city)}</small></td><td>${o.items.reduce((s, i) => s + i.qty, 0)}</td><td class="r mono">${S.inr(o.subtotal)}</td><td>${pill(o.status)}</td><td class="muted">${o.channel === 'website' ? 'Website' : 'WhatsApp DM'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="muted">No orders match.</td></tr>'}
+      ${shown.map(o => { const c = S.customer(o.cid); return `<tr data-href="#admin-order-${o.number}"><td><a href="#admin-order-${o.number}"><b>${o.number}</b></a></td><td>${S.fmtDate(o.created, { day: 'numeric', month: 'short' })}</td><td>${e(c.name)}<small>${e(c.city)}</small></td><td>${o.items.reduce((s, i) => s + i.qty, 0)}</td><td class="r mono">${S.inr(o.subtotal)}</td><td>${pill(o.status)}${S.isStale(o) ? ' <span class="pill s-stale">No reply 3+ days</span>' : ''}</td><td class="muted">${o.channel === 'website' ? 'Website' : 'WhatsApp DM'}</td></tr>`; }).join('') || '<tr><td colspan="7" class="muted">No orders match.</td></tr>'}
       </tbody></table></div>${list.length > 80 ? `<p class="muted small">Showing the latest 80 of ${list.length} orders.</p>` : ''}`;
     return shell('orders', 'Orders', body);
   }
@@ -171,56 +172,107 @@
     const q = document.getElementById('o-q'); let t; q.oninput = () => { clearTimeout(t); t = setTimeout(() => { ui.orderQ = q.value.trim(); rerender(true); }, 250); };
     document.querySelectorAll('tr[data-href]').forEach(r => r.onclick = ev => { if (ev.target.closest('a')) return; location.hash = r.dataset.href.slice(1); });
   }
+  const ACTION = { confirmed: 'Confirm (payment received)', shipped: 'Mark dispatched', delivered: 'Mark delivered', cancelled: 'Cancel order', abandoned: 'Mark abandoned', pending: 'Move back to pending' };
   function orderDetail(num) {
     const o = S.order(num);
     if (!o) return shell('orders', 'Order not found', '<p><a href="#admin-orders">Back to orders</a></p>');
     const c = S.customer(o.cid);
-    const next = { pending: [['confirmed', 'Confirm order', 'primary'], ['cancelled', 'Cancel order', 'danger']], confirmed: [['shipped', 'Mark shipped', 'primary'], ['cancelled', 'Cancel order', 'danger']], shipped: [['delivered', 'Mark delivered', 'primary'], ['cancelled', 'Cancel order', 'danger']], delivered: [], cancelled: [] }[o.status];
+    const next = S.NEXT[o.status] || [];
     const short = o.status === 'pending' ? S.shortfall(o) : [];
+    const editItems = o.status === 'pending' && ui.editOrder;
     const wa = `https://wa.me/91${c.phone}?text=${encodeURIComponent(`Hi ${c.name.split(' ')[0]}, this is Dè Stories about your order ${o.number}.`)}`;
+    const items = `<table class="tbl plain"><tbody>${o.items.map((i, n) => { const h = S.variant(i.vid); return `<tr><td class="od-img">${h ? `<img src="${e(h.p.images[0])}" alt="">` : ''}</td><td><b>${e(i.name)}</b><small>${e(i.label === 'One size' ? i.size : i.label)} · ${S.inr(i.price)} each${i.mrp && i.mrp > i.price ? ` <s>${S.inr(i.mrp)}</s> offer` : ''}${h ? ` · ${h.v.stock} in stock` : ''}</small></td>
+        <td class="r">${editItems ? `<label class="sr" for="oq-${n}">Quantity</label><input class="inline-in num" id="oq-${n}" data-oq="${n}" inputmode="numeric" value="${i.qty}">` : '× ' + i.qty}</td><td class="r mono">${S.inr(i.price * i.qty)}</td>${editItems ? `<td><button type="button" class="icon-btn" data-orm="${n}" aria-label="Remove item" ${o.items.length < 2 ? 'disabled' : ''}>${I('x')}</button></td>` : ''}</tr>`; }).join('')}
+      <tr class="tot"><td></td><td>Subtotal</td><td></td><td class="r mono">${S.inr(o.subtotal)}</td>${editItems ? '<td></td>' : ''}</tr></tbody></table>`;
     const body = `<p class="crumb"><a href="#admin-orders">Orders</a> / ${o.number}</p>
+      ${S.isStale(o) ? `<p class="warn-box">No update for ${Math.floor((Date.now() - o.created) / S.DAY)} days. If the customer never sent the WhatsApp message or stopped replying, mark it <b>Abandoned</b>. Stock is not affected.</p>` : ''}
       <div class="od-grid">
-        <section class="panel"><div class="p-head"><h2>Items</h2>${pill(o.status)}</div>
-          <table class="tbl plain"><tbody>${o.items.map(i => { const h = S.variant(i.vid); return `<tr><td class="od-img">${h ? `<img src="${e(h.p.images[0])}" alt="">` : ''}</td><td><b>${e(i.name)}</b><small>${e(i.label === 'One size' ? i.size : i.label)} · ${S.inr(i.price)} each${h ? ` · ${h.v.stock} in stock` : ''}</small></td><td class="r">× ${i.qty}</td><td class="r mono">${S.inr(i.price * i.qty)}</td></tr>`; }).join('')}
-          <tr class="tot"><td></td><td>Subtotal</td><td></td><td class="r mono">${S.inr(o.subtotal)}</td></tr></tbody></table>
+        <div class="od-col">
+        <section class="panel"><div class="p-head"><h2>Items</h2>${pill(o.status)}</div>${items}
           ${short.length ? `<p class="warn-box">Confirming will take ${short.map(i => `<b>${e(i.name)}</b>`).join(', ')} below zero stock. Confirm only if you have unlisted pieces, then fix the count in Inventory.</p>` : ''}
-          <div class="btn-row">${next.map(n => `<button class="btn ${n[2]}" data-st="${n[0]}">${n[1]}</button>`).join('')}<a class="btn wa" href="${wa}" target="_blank" rel="noopener">${I('wa')} Message on WhatsApp</a></div>
-          <div id="confirm-cancel" hidden class="inline-confirm"><p>Cancel ${o.number}? ${S.COUNTED.includes(o.status) ? 'Stock for these items will be added back.' : ''}</p><button class="btn danger" id="yes-cancel">Yes, cancel order</button><button class="btn ghost" id="no-cancel">Keep order</button></div>
-          ${o.status === 'pending' ? '<p class="a-note">Confirm once the customer has agreed on WhatsApp and paid. Stock for each item goes down when you confirm.</p>' : ''}
         </section>
-        <section class="panel"><div class="p-head"><h2>Customer</h2></div>
-          <p><a href="#admin-customer-${c.id}"><b>${e(c.name)}</b></a></p><p class="mono">+91 ${e(c.phone)}</p>${c.email ? `<p>${e(c.email)}</p>` : ''}
+
+        <section class="panel" id="status-panel"><div class="p-head"><h2>Update status</h2><a class="btn wa sm" href="${wa}" target="_blank" rel="noopener">${I('wa')} Message customer</a></div>
+          ${next.length ? `<form id="st-form" class="form" novalidate>
+            <fieldset class="field"><legend>Next step</legend><div class="st-choices">${next.map((n, k) => `<label class="st-choice ${n === 'cancelled' || n === 'abandoned' ? 'neg' : ''}"><input type="radio" name="next" value="${n}" ${k === 0 ? 'checked' : ''}><span>${ACTION[n]}</span></label>`).join('')}</div></fieldset>
+            <div class="two" id="dispatch-fields" ${next[0] === 'shipped' ? '' : 'hidden'}><div class="field"><label for="st-courier">Courier</label><input id="st-courier" list="couriers" value="${e((o.dispatch || {}).courier || '')}" placeholder="DTDC, India Post…"><datalist id="couriers"><option>DTDC</option><option>Professional Couriers</option><option>India Post</option><option>Shiprocket</option><option>Hand delivery</option></datalist></div><div class="field"><label for="st-track">Tracking number</label><input id="st-track" value="${e((o.dispatch || {}).tracking || '')}"></div></div>
+            <div class="field"><label for="st-note">Note <span class="opt">optional, kept in the timeline</span></label><input id="st-note" placeholder="e.g. Paid ₹3,200 by UPI · customer asked for Saturday delivery"></div>
+            <p class="a-note" id="st-hint"></p>
+            <button class="btn primary" type="submit">Save status</button>
+          </form>` : `<p class="a-note">This order is ${STATUS[o.status].toLowerCase()}. ${o.status === 'cancelled' ? 'You can move it back to Pending if the customer returns.' : 'No further status changes.'}</p>`}
+          <form id="note-form" class="row-in note-row"><div class="field grow"><label for="note-in">Add a note without changing status</label><input id="note-in" placeholder="e.g. Customer will pay on Friday"></div><button class="btn ghost" type="submit">Add note</button></form>
+        </section>
+        </div>
+
+        <div class="od-col">
+        <section class="panel"><div class="p-head"><h2>Order details</h2>${ui.editOrder ? '' : '<button class="btn ghost sm" id="edit-order">Edit</button>'}</div>
+          ${ui.editOrder ? `<form id="od-form" class="form" novalidate>
+            <div class="field"><label for="od-name">Customer name</label><input id="od-name" value="${e(c.name)}"></div>
+            <div class="two"><div class="field"><label for="od-phone">Phone</label><input id="od-phone" inputmode="numeric" maxlength="10" value="${e(c.phone)}"></div><div class="field"><label for="od-email">Email</label><input id="od-email" type="email" value="${e(c.email)}"></div></div>
+            <div class="field"><label for="od-ful">Delivery or pickup</label><select id="od-ful"><option value="delivery" ${o.fulfil === 'delivery' ? 'selected' : ''}>Deliver</option><option value="pickup" ${o.fulfil === 'pickup' ? 'selected' : ''}>Store pickup</option></select></div>
+            <div class="field"><label for="od-addr">Address</label><input id="od-addr" value="${e(o.address)}"></div>
+            <div class="two"><div class="field"><label for="od-city">City</label><input id="od-city" value="${e(o.city)}"></div><div class="field"><label for="od-pin">Pincode</label><input id="od-pin" inputmode="numeric" maxlength="6" value="${e(o.pincode)}"></div></div>
+            <div class="field"><label for="od-notes">Customer notes</label><input id="od-notes" value="${e(o.notes)}"></div>
+            ${o.status === 'pending' ? '<p class="a-note">You can also change quantities or remove items in the Items table while the order is Pending.</p>' : '<p class="a-note">Items can only be changed while the order is Pending, before stock is reduced.</p>'}
+            <p class="form-err" id="od-err" role="alert" hidden></p>
+            <div class="btn-row"><button class="btn primary" type="submit">Save changes</button><button class="btn ghost" type="button" id="od-cancel">Discard</button></div>
+          </form>` : `<p><a href="#admin-customer-${c.id}"><b>${e(c.name)}</b></a></p><p class="mono">+91 ${e(c.phone)}</p>${c.email ? `<p>${e(c.email)}</p>` : ''}
           <h3 class="p-sub">${o.fulfil === 'pickup' ? 'Store pickup' : 'Deliver to'}</h3>${o.fulfil === 'pickup' ? '<p>Experience Store, Alfa Horizon</p>' : `<p>${e(o.address)}<br>${e(o.city)} ${e(o.pincode)}</p>`}
-          ${o.notes ? `<h3 class="p-sub">Notes</h3><p>${e(o.notes)}</p>` : ''}
-          <h3 class="p-sub">Timeline</h3><ol class="timeline">${o.history.map(h => `<li>${pill(h.s)}<span class="muted small">${S.fmtDateTime(h.at)}</span></li>`).join('')}</ol>
+          ${o.dispatch ? `<h3 class="p-sub">Dispatch</h3><p>${e(o.dispatch.courier)}${o.dispatch.tracking ? ` · <span class="mono">${e(o.dispatch.tracking)}</span>` : ''}</p>` : ''}
+          ${o.notes ? `<h3 class="p-sub">Customer notes</h3><p>${e(o.notes)}</p>` : ''}`}
         </section>
+        <section class="panel"><div class="p-head"><h2>Timeline</h2></div>
+          <ol class="timeline">${o.history.slice().reverse().map(h => `<li><div class="tl-top">${h.s === 'note' ? '<span class="pill">Note</span>' : h.s === 'edited' ? '<span class="pill">Edited</span>' : pill(h.s)}<span class="muted small">${S.fmtDateTime(h.at)}</span></div>${h.note ? `<p class="tl-note">${e(h.note)}</p>` : ''}${h.by ? `<p class="muted small">by ${e(h.by)}</p>` : ''}</li>`).join('')}</ol>
+        </section>
+        </div>
       </div>`;
     return shell('orders', 'Order ' + o.number, body);
   }
   function bindOrderDetail(rerender, num) {
     const o = S.order(num); if (!o) return;
-    document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => {
-      if (b.dataset.st === 'cancelled') { document.getElementById('confirm-cancel').hidden = false; return; }
-      S.setStatus(o, b.dataset.st);
-      UI.toast(b.dataset.st === 'confirmed' ? `${o.number} confirmed. Stock updated for ${o.items.length} item${o.items.length > 1 ? 's' : ''}.` : `${o.number} marked ${STATUS[b.dataset.st].toLowerCase()}.`);
-      rerender();
-    });
-    const y = document.getElementById('yes-cancel'); if (y) y.onclick = () => { const was = S.COUNTED.includes(o.status); S.setStatus(o, 'cancelled'); UI.toast(`${o.number} cancelled.${was ? ' Stock added back.' : ''}`); rerender(); };
-    const n = document.getElementById('no-cancel'); if (n) n.onclick = () => { document.getElementById('confirm-cancel').hidden = true; };
+    const g = id => document.getElementById(id);
+    const hint = () => {
+      const n = (document.querySelector('input[name=next]:checked') || {}).value; if (!n) return;
+      g('dispatch-fields').hidden = n !== 'shipped';
+      const was = S.COUNTED.includes(o.status), now = S.COUNTED.includes(n);
+      g('st-hint').textContent = now && !was ? `Stock goes down for ${o.items.length} item${o.items.length > 1 ? 's' : ''} when you save.` : !now && was ? 'Stock for these items will be added back.' : n === 'abandoned' ? 'Use this when the customer never sent the WhatsApp message or stopped replying. Stock is not affected.' : 'Stock is not affected.';
+    };
+    document.querySelectorAll('input[name=next]').forEach(r => r.onchange = hint); if (g('st-form')) hint();
+    if (g('st-form')) g('st-form').onsubmit = ev => {
+      ev.preventDefault();
+      const n = document.querySelector('input[name=next]:checked').value;
+      S.setStatus(o, n, g('st-note').value.trim(), n === 'shipped' ? { courier: g('st-courier').value.trim(), tracking: g('st-track').value.trim() } : null);
+      UI.toast(`${o.number}: ${STATUS[n]}.`); rerender();
+    };
+    g('note-form').onsubmit = ev => { ev.preventDefault(); const v = g('note-in').value.trim(); if (!v) { UI.toast('Type a note first.'); return; } S.addNote(o, v); UI.toast('Note added.'); rerender(true); };
+    const eb = g('edit-order'); if (eb) eb.onclick = () => { ui.editOrder = true; rerender(true); };
+    const dc = g('od-cancel'); if (dc) dc.onclick = () => { ui.editOrder = false; rerender(true); };
+    document.querySelectorAll('[data-orm]').forEach(b => b.onclick = () => { o.items.splice(+b.dataset.orm, 1); o.subtotal = o.items.reduce((s, i) => s + i.price * i.qty, 0); S.save(); rerender(true); });
+    const f = g('od-form'); if (f) f.onsubmit = ev => {
+      ev.preventDefault();
+      const v = id => g(id).value.trim(), err = g('od-err');
+      if (!v('od-name') || !/^[6-9]\d{9}$/.test(v('od-phone'))) { err.textContent = 'Please keep a name and a 10-digit mobile number.'; err.hidden = false; return; }
+      const c = S.customer(o.cid); c.name = v('od-name'); c.phone = v('od-phone'); c.email = v('od-email');
+      Object.assign(o, { fulfil: v('od-ful'), address: v('od-addr'), city: v('od-city'), pincode: v('od-pin'), notes: v('od-notes') });
+      document.querySelectorAll('[data-oq]').forEach(inp => { const q = parseInt(inp.value, 10); if (q > 0) o.items[+inp.dataset.oq].qty = q; });
+      o.subtotal = o.items.reduce((s, i) => s + i.price * i.qty, 0);
+      o.history.push({ s: 'edited', at: Date.now(), note: 'Order details updated', by: S.db.session.email });
+      ui.editOrder = false; S.save(); UI.toast('Order updated.'); rerender(true);
+    };
   }
 
   /* ---------- products ---------- */
   function products() {
     let list = S.db.products.slice();
     if (ui.prodCat) list = list.filter(p => p.cat === ui.prodCat);
-    if (ui.prodStock) list = list.filter(p => ui.prodStock === 'hidden' ? !p.visible : S.productStockState(p) === ui.prodStock);
+    if (ui.prodStock) list = list.filter(p => ui.prodStock === 'hidden' ? !p.visible : ui.prodStock === 'sale' ? S.productOnSale(p) : S.productStockState(p) === ui.prodStock);
     if (ui.prodQ) { const q = ui.prodQ.toLowerCase(); list = list.filter(p => p.name.toLowerCase().includes(q) || p.variants.some(v => v.sku.toLowerCase().includes(q))); }
     const body = `<div class="toolbar"><input id="p-q" type="search" class="search" placeholder="Search name or SKU" value="${e(ui.prodQ)}" aria-label="Search products">
       <select id="p-cat" class="sel" aria-label="Category"><option value="">All categories</option>${S.db.categories.map(c => `<option value="${c.id}" ${ui.prodCat === c.id ? 'selected' : ''}>${e(c.name)}</option>`).join('')}</select>
-      <select id="p-stock" class="sel" aria-label="Stock"><option value="">Any status</option><option value="low" ${ui.prodStock === 'low' ? 'selected' : ''}>Low stock</option><option value="out" ${ui.prodStock === 'out' ? 'selected' : ''}>Out of stock</option><option value="hidden" ${ui.prodStock === 'hidden' ? 'selected' : ''}>Hidden</option></select>
+      <select id="p-stock" class="sel" aria-label="Stock"><option value="">Any status</option><option value="low" ${ui.prodStock === 'low' ? 'selected' : ''}>Low stock</option><option value="out" ${ui.prodStock === 'out' ? 'selected' : ''}>Out of stock</option><option value="hidden" ${ui.prodStock === 'hidden' ? 'selected' : ''}>Hidden</option><option value="sale" ${ui.prodStock === 'sale' ? 'selected' : ''}>On sale</option></select>
       <span class="muted small">${list.length} products</span></div>
       <div class="table-wrap"><table class="tbl"><thead><tr><th></th><th>Product</th><th>Category</th><th class="r">Price</th><th class="r">Stock</th><th>Status</th><th class="c">Featured</th></tr></thead><tbody>
-      ${list.map(p => { const [a, b] = S.priceRange(p); return `<tr data-href="#admin-product-${p.id}"><td class="od-img"><img src="${e(p.images[0])}" alt="" loading="lazy"></td><td><a href="#admin-product-${p.id}"><b>${e(p.name)}</b></a><small>${p.variants.length > 1 ? p.variants.length + ' sizes' : e(p.variants[0].size)} · ${e(p.variants[0].sku)}</small></td><td>${e((S.cat(p.cat) || { name: '—' }).name)}</td><td class="r mono">${a === b ? S.inr(a) : S.inr(a) + '–' + S.inr(b).slice(1)}</td><td class="r mono">${S.totalStock(p)}</td><td>${p.visible ? stockPill(S.productStockState(p)) : '<span class="pill s-hidden">Hidden</span>'}</td><td class="c">${p.featured ? '★' : ''}</td></tr>`; }).join('') || '<tr><td colspan="7" class="muted">No products match.</td></tr>'}
+      ${list.map(p => { const [a, b] = S.priceRange(p); return `<tr data-href="#admin-product-${p.id}"><td class="od-img"><img src="${e(p.images[0])}" alt="" loading="lazy"></td><td><a href="#admin-product-${p.id}"><b>${e(p.name)}</b></a><small>${p.variants.length > 1 ? p.variants.length + ' sizes' : e(p.variants[0].size)} · ${e(p.variants[0].sku)}</small></td><td>${e((S.cat(p.cat) || { name: '—' }).name)}</td><td class="r mono">${a === b ? S.inr(a) : S.inr(a) + '–' + S.inr(b).slice(1)}${S.productOnSale(p) ? '<small class="sale-t">On sale</small>' : ''}</td><td class="r mono">${S.totalStock(p)}</td><td>${p.visible ? stockPill(S.productStockState(p)) : '<span class="pill s-hidden">Hidden</span>'}</td><td class="c">${p.featured ? '★' : ''}</td></tr>`; }).join('') || '<tr><td colspan="7" class="muted">No products match.</td></tr>'}
       </tbody></table></div>`;
     return shell('products', 'Products', body, `<a class="btn primary" href="#admin-new">${I('plus')} Add product</a>`);
   }
@@ -253,11 +305,12 @@
             <fieldset class="field"><legend>Rooms and collections</legend><div class="chips">${TAGS.map(t => `<label class="chip check ${d.tags.includes(t[0]) ? 'on' : ''}"><input type="checkbox" value="${t[0]}" ${d.tags.includes(t[0]) ? 'checked' : ''}> ${t[1]}</label>`).join('')}</div></fieldset>
           </section>
           <section class="panel"><div class="p-head"><h2>Sizes, prices and stock</h2><button type="button" class="btn ghost sm" id="add-var">${I('plus')} Add a size</button></div>
-            <p class="a-note">Add one row per size. Shoppers see a size picker when there is more than one, and the price changes with the size.</p>
+            <p class="a-note">Add one row per size. Shoppers see a size picker when there is more than one, and the price changes with the size. Add a <b>sale price</b> for festive offers: shoppers see it with the regular price struck through. Clear it to end the offer.</p>
             <div class="var-table" id="var-rows">${d.variants.map((v, i) => `<div class="var-row" data-i="${i}">
               <div class="field"><label for="v-label-${i}">Size label</label><input id="v-label-${i}" data-k="label" value="${e(v.label)}" placeholder="13 in"></div>
               <div class="field"><label for="v-size-${i}">Dimensions</label><input id="v-size-${i}" data-k="size" value="${e(v.size)}" placeholder="13 in height"></div>
               <div class="field"><label for="v-price-${i}">Price (₹)</label><input id="v-price-${i}" data-k="price" inputmode="numeric" value="${v.price || ''}"></div>
+              <div class="field"><label for="v-sale-${i}">Sale price (₹) <span class="opt">optional</span></label><input id="v-sale-${i}" data-k="sale" inputmode="numeric" value="${v.sale || ''}" placeholder="—"></div>
               <div class="field"><label for="v-stock-${i}">Stock</label><input id="v-stock-${i}" data-k="stock" inputmode="numeric" value="${v.stock}"></div>
               <div class="field"><label for="v-sku-${i}">SKU</label><input id="v-sku-${i}" data-k="sku" value="${e(v.sku)}"></div>
               <button type="button" class="icon-btn rm-var" data-rm="${i}" aria-label="Remove this size" ${d.variants.length < 2 ? 'disabled' : ''}>${I('x')}</button>
@@ -293,7 +346,7 @@
     d.tags = [...document.querySelectorAll('#pf .chip.check input:checked')].map(x => x.value);
     d.desc = g('pf-desc').value.trim(); d.material = g('pf-mat').value.trim(); d.weight = g('pf-wt').value.trim(); d.care = g('pf-care').value.trim();
     d.visible = g('pf-vis').checked; d.featured = g('pf-feat').checked;
-    document.querySelectorAll('.var-row').forEach(r => { const v = d.variants[+r.dataset.i]; r.querySelectorAll('input').forEach(inp => { const k = inp.dataset.k; v[k] = (k === 'price' || k === 'stock') ? (parseInt(inp.value.replace(/\D/g, ''), 10) || 0) : inp.value.trim(); }); });
+    document.querySelectorAll('.var-row').forEach(r => { const v = d.variants[+r.dataset.i]; r.querySelectorAll('input').forEach(inp => { const k = inp.dataset.k; v[k] = (k === 'price' || k === 'stock') ? (parseInt(inp.value.replace(/\D/g, ''), 10) || 0) : k === 'sale' ? (parseInt(inp.value.replace(/\D/g, ''), 10) || null) : inp.value.trim(); }); });
   }
   function shrink(file) {
     return new Promise(res => {
@@ -306,7 +359,7 @@
     const g = x => document.getElementById(x);
     g('pf-cat').onchange = () => { g('newcat-field').hidden = g('pf-cat').value !== '__new'; if (!g('newcat-field').hidden) g('pf-newcat').focus(); };
     document.querySelectorAll('#pf .chip.check input').forEach(c => c.onchange = () => c.parentElement.classList.toggle('on', c.checked));
-    g('add-var').onclick = () => { readDraft(); const base = draft.variants[0]; draft.variants.push({ id: S.uid('v'), label: '', size: '', price: base.price, stock: 0, lowAt: null, sku: '', image: '' }); if (draft.variants[0].label === 'One size') draft.variants[0].label = ''; rerender(true); setTimeout(() => { const n = draft.variants.length - 1; const el = g('v-label-' + n); el && el.focus(); }); };
+    g('add-var').onclick = () => { readDraft(); const base = draft.variants[0]; draft.variants.push({ id: S.uid('v'), label: '', size: '', price: base.price, sale: base.sale || null, stock: 0, lowAt: null, sku: '', image: '' }); if (draft.variants[0].label === 'One size') draft.variants[0].label = ''; rerender(true); setTimeout(() => { const n = draft.variants.length - 1; const el = g('v-label-' + n); el && el.focus(); }); };
     document.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { readDraft(); draft.variants.splice(+b.dataset.rm, 1); rerender(true); });
     document.querySelectorAll('[data-rmimg]').forEach(b => b.onclick = () => { readDraft(); draft.images.splice(+b.dataset.rmimg, 1); rerender(true); });
     g('pf-img').onchange = async ev => { readDraft(); for (const f of ev.target.files) { const u = await shrink(f); if (u) draft.images.push(u); } rerender(true); };
@@ -316,6 +369,7 @@
       if (!d.name) errs.push('a product name');
       if (d.cat === '__new' && !g('pf-newcat').value.trim()) errs.push('a name for the new category');
       if (d.variants.some(v => !v.price)) errs.push('a price for every size');
+      if (d.variants.some(v => v.sale && v.sale >= v.price)) errs.push('a sale price lower than the regular price (or leave it empty)');
       if (d.variants.length > 1 && d.variants.some(v => !v.label)) errs.push('a label for every size (e.g. 13 in)');
       if (errs.length) { err.textContent = 'Please add ' + errs.join(', ') + '.'; err.hidden = false; return; }
       if (d.cat === '__new') { const name = g('pf-newcat').value.trim(); const cid = S.slugify(name); if (!S.cat(cid)) S.db.categories.push({ id: cid, name, slug: cid, sort: S.db.categories.length, visible: true, cover: '' }); d.cat = cid; }
@@ -517,6 +571,7 @@
     };
     const [v, b] = map[route] || map[''];
     if (route !== 'product' && route !== 'new') draft = null;
+    if (route !== 'order' || arg !== ui.editFor) { ui.editOrder = false; ui.editFor = arg; }
     return { html: v(), bind: () => { bindShell(); b(rerender); } };
   }
 

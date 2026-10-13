@@ -46,12 +46,16 @@ window.DEFAULT_ADMINS = ['teena.anie9@gmail.com', 'tins08@gmail.com', 'owner@des
       featured: p.featured, visible: true, flag: p.flag || '', created: Date.now() - (200 - i) * DAY,
       variants: p.variants.map((v, j) => ({
         id: p.id + '-v' + j, label: v.label, size: v.size, price: v.price,
-        stock: 3 + Math.floor(r() * 12), lowAt: null, sku: 'DS-' + p.id.slice(1) + (p.variants.length > 1 ? '-' + v.label.replace(/\D/g, '') : ''), image: ''
+        stock: 3 + Math.floor(r() * 12), sale: null, lowAt: null, sku: 'DS-' + p.id.slice(1) + (p.variants.length > 1 ? '-' + v.label.replace(/\D/g, '') : ''), image: ''
       }))
     }));
     // A handful of stock alerts so the restock list has something to say.
     [['p001-v0', 2], ['p084-v0', 0], ['p036-v1', 1], ['p061-v0', 1], ['p090-v0', 0], ['p106-v0', 2], ['p022-v0', 3], ['p051-v0', 1]]
       .forEach(([vid, s]) => products.forEach(p => p.variants.forEach(v => { if (v.id === vid) v.stock = s; })));
+
+    // Christmas offer: a few festive pieces carry a sale price (original shown struck through).
+    [['p001-v0', 1799], ['p001-v1', 1349], ['p013-v0', 5199], ['p106-v0', 1499], ['p051-v0', 499], ['p079-v0', 1749], ['p096-v0', 1549], ['p009-v0', 169]]
+      .forEach(([vid, sp]) => products.forEach(p => p.variants.forEach(v => { if (v.id === vid) v.sale = sp; })));
 
     // Product popularity: a long tail. Cheaper pieces and featured ones sell more often.
     const pop = new Map();
@@ -109,22 +113,28 @@ window.DEFAULT_ADMINS = ['teena.anie9@gmail.com', 'tins08@gmail.com', 'owner@des
           }));
           if (items.some(i => i.pid === p.id)) continue;
           const v = p.variants[Math.floor(r() * p.variants.length)];
-          items.push({ pid: p.id, vid: v.id, name: p.name, label: v.label, size: v.size, price: v.price, qty: r() < 0.14 ? 2 : 1 });
+          items.push({ pid: p.id, vid: v.id, name: p.name, label: v.label, size: v.size, price: v.price, mrp: v.price, qty: r() < 0.14 ? 2 : 1 });
         }
         const age = (now - at) / DAY;
         let status = age < 2.5 ? (r() < 0.75 ? 'pending' : 'confirmed') : age < 6 ? weighted(r, [['confirmed', 4], ['shipped', 5], ['pending', 1]]) : age < 12 ? weighted(r, [['shipped', 4], ['delivered', 6]]) : 'delivered';
         if (r() < 0.05 && age > 2) status = 'cancelled';
-        const hist = [{ s: 'pending', at }];
-        if (status !== 'pending' && status !== 'cancelled') hist.push({ s: 'confirmed', at: at + 3 * 3600000 });
-        if (status === 'shipped' || status === 'delivered') hist.push({ s: 'shipped', at: at + 1.2 * DAY });
-        if (status === 'delivered') hist.push({ s: 'delivered', at: at + 3.5 * DAY });
-        if (status === 'cancelled') hist.push({ s: 'cancelled', at: at + 5 * 3600000 });
+        else if (r() < 0.06 && age > 4) status = 'abandoned';
         const fulfil = r() < 0.22 ? 'pickup' : 'delivery';
+        const by = 'teena.anie9@gmail.com';
+        const courier = ['DTDC', 'Professional Couriers', 'India Post', 'Shiprocket'][Math.floor(r() * 4)];
+        const tracking = fulfil === 'pickup' ? '' : courier.slice(0, 2).toUpperCase() + String(Math.floor(r() * 1e9)).padStart(9, '0');
+        const hist = [{ s: 'pending', at, note: '', by: '' }];
+        if (status !== 'pending' && status !== 'cancelled' && status !== 'abandoned') hist.push({ s: 'confirmed', at: at + 3 * 3600000, note: 'Paid by UPI', by });
+        if (status === 'shipped' || status === 'delivered') hist.push({ s: 'shipped', at: at + 1.2 * DAY, note: fulfil === 'pickup' ? 'Ready for pickup at the store' : `${courier} · ${tracking}`, by });
+        if (status === 'delivered') hist.push({ s: 'delivered', at: at + 3.5 * DAY, note: fulfil === 'pickup' ? 'Collected from the store' : '', by });
+        if (status === 'cancelled') hist.push({ s: 'cancelled', at: at + 5 * 3600000, note: ['Customer changed their mind', 'Item needed sooner than we could deliver', 'Duplicate order'][Math.floor(r() * 3)], by });
+        if (status === 'abandoned') hist.push({ s: 'abandoned', at: at + 3.5 * DAY, note: 'No reply on WhatsApp after 3 days', by });
         orders.push({
           number: 'DS-' + (num++), cid: c.id, status, channel: r() < 0.7 ? 'website' : 'whatsapp', fulfil,
           address: fulfil === 'pickup' ? '' : (Math.floor(r() * 90) + 1) + ', ' + ['Green Meadows', 'Palm Grove Apts', 'Skyline Ivy League', 'DLF Riverside', 'Prestige Lakeside', 'Rose Villa', 'Chakkaraparambu Rd', 'Marine Drive'][Math.floor(r() * 8)],
           city: c.city, pincode: '68' + String(Math.floor(r() * 9000) + 1000), notes: r() < 0.12 ? ['Gift wrap please', 'Call before delivery', 'Need before Sunday', 'Birthday gift — no price tag'][Math.floor(r() * 4)] : '',
-          items, subtotal: items.reduce((s, i) => s + i.price * i.qty, 0), created: at, history: hist
+          items, subtotal: items.reduce((s, i) => s + i.price * i.qty, 0), created: at, history: hist,
+          dispatch: (status === 'shipped' || status === 'delivered') && fulfil === 'delivery' ? { courier, tracking } : null
         });
       }
     }
@@ -162,7 +172,7 @@ window.DEFAULT_ADMINS = ['teena.anie9@gmail.com', 'tins08@gmail.com', 'owner@des
     }));
 
     return {
-      v: 1, builtAt: now, categories, products, customers, orders, moves, enquiries, cart: [], session: null,
+      v: 2, builtAt: now, categories, products, customers, orders, moves, enquiries, cart: [], session: null,
       settings: {
         whatsapp: '918330093360', phoneDisplay: '+91 83300 93360',
         address: 'Dè Stories, Alfa Horizon, Vallarpadam, Kochi',

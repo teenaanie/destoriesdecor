@@ -437,7 +437,7 @@ body.is-admin { background: var(--paper-2); font-size: 15px; }
 .s-confirmed, .s-contacted, .s-site_visit, .s-quoted, .s-repeat { background: var(--info-bg); color: var(--info); }
 .s-shipped { background: var(--sage); color: var(--ink); }
 .s-delivered, .s-won, .s-ok { background: var(--ok-bg); color: var(--ok); }
-.s-cancelled, .s-lost, .s-out { background: var(--bad-bg); color: var(--bad); }
+.s-cancelled, .s-lost, .s-out, .s-abandoned { background: var(--bad-bg); color: var(--bad); }
 .s-hidden { background: var(--paper-2); color: var(--ink-2); }
 .s-repeat { margin-left: 6px; vertical-align: 1px; }
 
@@ -496,7 +496,7 @@ body.is-admin { background: var(--paper-2); font-size: 15px; }
 .pf-main .panel > h2, .pf-side .panel > h2 { margin-bottom: 0; }
 .pf-main .p-head { margin-bottom: 0; }
 .var-table { display: grid; gap: 10px; }
-.var-row { display: grid; grid-template-columns: 1fr 1.4fr .9fr .7fr 1fr 36px; gap: 8px; align-items: end; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+.var-row { display: grid; grid-template-columns: .9fr 1.3fr .8fr .9fr .6fr 1fr 36px; gap: 8px; align-items: end; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
 .var-row .field input { padding: 8px 10px; }
 .var-row .icon-btn { margin-bottom: 4px; }
 .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -595,3 +595,42 @@ body.is-admin { background: var(--paper-2); font-size: 15px; }
 .adm small { color: var(--ink-2); }
 .panel.narrow .row-in { margin-top: 10px; }
 @media (max-width: 640px) { .kpis .kpi:last-child:nth-child(odd) { grid-column: 1 / -1; } }
+
+/* ---------- sale prices ---------- */
+.was { color: var(--ink-2); font-weight: 400; text-decoration-thickness: 1.5px; font-size: .9em; }
+.now { color: var(--bad); }
+.badge.sale { background: var(--bad); color: var(--paper); }
+.hang-tag.on-sale .tag-price { color: var(--bad); }
+.tag-was { font-size: .82rem; color: var(--ink-2); margin-top: 4px; }
+.tag-was s { margin-right: 6px; }
+.sc-p .now { color: var(--bad); }
+.sum-row.save { color: var(--ok); font-weight: 600; }
+.sale-t { color: var(--bad) !important; font-weight: 600; }
+.summary li .mono .was { display: block; text-align: right; }
+.cl-price .was { display: block; text-align: right; font-size: .8rem; }
+
+/* ---------- checkout consent, policies ---------- */
+.consent { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; font-size: .9rem; color: var(--ink-2); }
+.consent input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--wood-2); }
+.consent a { color: var(--wood); font-weight: 600; }
+.policy { padding-block: 26px 70px; max-width: 760px; display: grid; gap: 18px; }
+.policy section { display: grid; gap: 6px; }
+.policy h2 { font-size: 1.3rem; }
+.policy section p { color: var(--ink-2); max-width: 65ch; }
+.foot-legal { grid-column: 1 / -1; display: flex !important; flex-wrap: wrap; gap: 18px; padding-top: 16px; border-top: 1px solid var(--line); font-size: .86rem; }
+
+/* ---------- admin order detail ---------- */
+.od-col { display: grid; gap: 14px; min-width: 0; align-content: start; }
+.st-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.st-choice { position: relative; display: flex; align-items: center; border: 1.5px solid var(--line-2); border-radius: 10px; padding: 9px 14px; cursor: pointer; font-size: .9rem; font-weight: 600; background: var(--paper-2); }
+.st-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.st-choice:has(input:checked) { border-color: var(--ink); background: var(--ink); color: var(--bg); }
+.st-choice.neg:has(input:checked) { border-color: var(--bad); background: var(--bad); color: var(--paper); }
+.st-choice:focus-within { outline: 2px solid var(--wood); outline-offset: 2px; }
+.note-row { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line-2); }
+.timeline li { display: grid; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.timeline li:last-child { border-bottom: 0; }
+.tl-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.tl-note { font-size: .9rem; }
+.s-stale { background: var(--warn-bg); color: var(--warn); }
+@media (max-width: 640px) { .var-row { grid-template-columns: 1fr 1fr; } }

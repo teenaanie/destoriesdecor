@@ -53,7 +53,8 @@
       const V = {
         home: [Shop.home, null], shop: [() => Shop.shop(sameView ? undefined : a), () => Shop.bindShop(rerender)],
         product: [() => Shop.productView(a), () => Shop.bindProduct(rerender)], checkout: [Shop.checkout, Shop.bindCheckout], done: [() => Shop.done(a), Shop.bindDone],
-        studio: [Shop.studio, Shop.bindStudio], visit: [Shop.visit, Shop.bindVisit]
+        studio: [Shop.studio, Shop.bindStudio], visit: [Shop.visit, Shop.bindVisit],
+        privacy: [() => Shop.policy('privacy'), null], terms: [() => Shop.policy('terms'), null], shipping: [() => Shop.policy('shipping'), null]
       };
       const [v, bnd] = V[view] || V.home;
       html = v(); bind = () => { bindHeader(rerender); bnd && bnd(); };

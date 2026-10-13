@@ -3,7 +3,7 @@
   const S = Store, e = S.esc;
   const ROOMS = [['living', 'Living room'], ['bedroom', 'Bedroom'], ['dining', 'Dining'], ['study', 'Study'], ['balcony', 'Balcony & garden'], ['pooja', 'Pooja room']];
   const PRICES = [['u500', 'Under ₹500', 0, 499], ['500-1500', '₹500 – ₹1,500', 500, 1500], ['1500-3000', '₹1,500 – ₹3,000', 1501, 3000], ['3000+', '₹3,000 and above', 3001, 1e9]];
-  const COLLS = [['gift', 'Gift ideas'], ['christmas', 'Christmas edit']];
+  const COLLS = [['sale', 'On sale'], ['gift', 'Gift ideas'], ['christmas', 'Christmas edit']];
   const filters = { cat: '', room: '', price: '', coll: '', q: '', sort: 'featured' };
 
   const waLink = text => 'https://wa.me/' + S.db.settings.whatsapp + '?text=' + encodeURIComponent(text);
@@ -40,6 +40,7 @@
       <div><h4>Shop</h4>${S.visibleCats().map(c => `<a href="#shop-${c.id}">${e(c.name)}</a>`).join('')}</div>
       <div><h4>Studio</h4><a href="#studio">Interior design</a><a href="#studio-book">Book a consultation</a><a href="#visit">Experience Store</a></div>
       <div><h4>Talk to us</h4><p>${e(st.address)}</p><p class="mono">WhatsApp ${e(st.phoneDisplay)}</p><a href="https://www.instagram.com/de.stories.360/" target="_blank" rel="noopener">Instagram @de.stories.360</a><a href="#admin" class="owner-link">Owner login</a></div>
+      <div class="foot-legal"><a href="#privacy">Privacy Policy</a><a href="#terms">Terms of Sale</a><a href="#shipping">Shipping &amp; Returns</a></div>
     </div><div class="wrap foot-base">© 2026 Dè Stories · Kochi · Prototype for review</div></footer>`;
   }
 
@@ -54,13 +55,18 @@
     return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
   }
 
+  // Cheapest size drives the card price; if it is on sale, show the regular price struck through.
   function priceLabel(p) {
     const [a, b] = S.priceRange(p);
-    return a === b ? S.inr(a) : 'From ' + S.inr(a);
+    const v = p.variants.slice().sort((x, y) => S.price(x) - S.price(y))[0];
+    const was = S.onSale(v) ? ` <s class="was">${S.inr(v.price)}</s>` : '';
+    return (a === b ? '' : 'From ') + `<span class="${was ? 'now' : ''}">${S.inr(a)}</span>` + was;
   }
+  const wasNow = (v, qty = 1) => S.onSale(v) ? `<span class="now">${S.inr(S.price(v) * qty)}</span> <s class="was">${S.inr(v.price * qty)}</s>` : S.inr(v.price * qty);
   function card(p) {
     const st = S.productStockState(p);
-    const badge = st === 'out' ? '<span class="badge out">Sold out</span>' : st === 'low' ? '<span class="badge low">Few left</span>' : p.tags.includes('christmas') ? '<span class="badge xmas">Christmas</span>' : '';
+    const off = S.productOnSale(p) ? Math.max(...p.variants.filter(S.onSale).map(v => Math.round((1 - v.sale / v.price) * 100))) : 0;
+    const badge = st === 'out' ? '<span class="badge out">Sold out</span>' : off ? `<span class="badge sale">${off}% off</span>` : st === 'low' ? '<span class="badge low">Few left</span>' : p.tags.includes('christmas') ? '<span class="badge xmas">Christmas</span>' : '';
     return `<a class="card" href="#p-${p.slug}">
       <div class="card-img">${badge}<img src="${e(p.images[0])}" alt="${e(p.name)}" loading="lazy"></div>
       <div class="card-body"><span class="card-name">${e(p.name)}</span><span class="card-meta"><span class="card-price">${priceLabel(p)}</span>${p.variants.length > 1 ? `<span class="card-sizes">${p.variants.length} sizes</span>` : ''}</span></div>
@@ -125,7 +131,7 @@
     let ps = S.visibleProducts();
     if (filters.cat) ps = ps.filter(p => p.cat === filters.cat);
     if (filters.room) ps = ps.filter(p => p.tags.includes(filters.room));
-    if (filters.coll) ps = ps.filter(p => p.tags.includes(filters.coll));
+    if (filters.coll) ps = ps.filter(p => filters.coll === 'sale' ? S.productOnSale(p) : p.tags.includes(filters.coll));
     if (filters.price) { const b = PRICES.find(x => x[0] === filters.price); ps = ps.filter(p => { const [a] = S.priceRange(p); return a >= b[2] && a <= b[3]; }); }
     if (filters.q) { const q = filters.q.toLowerCase(); ps = ps.filter(p => (p.name + ' ' + (S.cat(p.cat) || {}).name + ' ' + p.tags.join(' ') + ' ' + p.material).toLowerCase().includes(q)); }
     const by = {
@@ -139,13 +145,13 @@
     return `<div class="fgroup" role="group" aria-label="${name}"><span class="flabel">${name}</span><div class="chips">${opts.map(o => `<button type="button" class="chip ${val === o[0] ? 'on' : ''}" data-f="${name.toLowerCase()}" data-v="${o[0]}" aria-pressed="${val === o[0]}">${e(o[1])}</button>`).join('')}</div></div>`;
   }
   function shop(param) {
-    if (param === 'christmas' || param === 'gift') { filters.coll = param; filters.cat = ''; }
+    if (param === 'christmas' || param === 'gift' || param === 'sale') { filters.coll = param; filters.cat = ''; }
     else if (param !== undefined) { filters.cat = param; filters.coll = ''; }
     const c = S.cat(filters.cat);
     const list = applyFilters();
     const active = [filters.cat, filters.room, filters.price, filters.coll, filters.q].filter(Boolean).length;
     return header('shop') + `<main id="main" class="wrap shop">
-      <div class="shop-head"><div><p class="crumb"><a href="#home">Home</a> / ${c ? e(c.name) : filters.coll === 'christmas' ? 'Christmas edit' : 'All pieces'}</p><h1>${c ? e(c.name) : filters.coll === 'christmas' ? 'Christmas edit' : filters.coll === 'gift' ? 'Gift ideas' : 'Shop all pieces'}</h1></div>
+      <div class="shop-head"><div><p class="crumb"><a href="#home">Home</a> / ${c ? e(c.name) : filters.coll === 'christmas' ? 'Christmas edit' : filters.coll === 'sale' ? 'On sale' : 'All pieces'}</p><h1>${c ? e(c.name) : filters.coll === 'christmas' ? 'Christmas edit' : filters.coll === 'gift' ? 'Gift ideas' : filters.coll === 'sale' ? 'Festive offers' : 'Shop all pieces'}</h1></div>
         <div class="sort"><label for="sort">Sort</label><select id="sort">${[['featured', 'Featured'], ['low', 'Price: low to high'], ['high', 'Price: high to low'], ['new', 'Newest']].map(o => `<option value="${o[0]}" ${filters.sort === o[0] ? 'selected' : ''}>${o[1]}</option>`).join('')}</select></div>
       </div>
       <div class="shop-body">
@@ -204,19 +210,19 @@
           <p class="eyebrow">${e(c.name)}</p>
           <h1>${e(p.name)}</h1>
           <div class="tag-row">
-            <div class="hang-tag" aria-label="Price"><span class="hole" aria-hidden="true"></span><span class="tag-price" id="pdp-price">${S.inr(v.price)}</span><span class="tag-size">${e(v.size)}</span></div>
+            <div class="hang-tag ${S.onSale(v) ? 'on-sale' : ''}" aria-label="Price"><span class="hole" aria-hidden="true"></span><span class="tag-price" id="pdp-price">${S.inr(S.price(v))}</span>${S.onSale(v) ? `<span class="tag-was"><s>${S.inr(v.price)}</s> Save ${S.inr(v.price - v.sale)}</span>` : ''}<span class="tag-size">${e(v.size)}</span></div>
             <p class="tag-note">Delivery charges are confirmed on WhatsApp before dispatch.</p>
           </div>
           ${p.variants.length > 1 ? `<fieldset class="sizes"><legend>Choose a size</legend><div class="size-chips">${p.variants.map(x => {
             const o = S.stockState(x) === 'out';
-            return `<label class="size-chip ${x.id === v.id ? 'on' : ''} ${o ? 'dis' : ''}"><input type="radio" name="size" value="${x.id}" ${x.id === v.id ? 'checked' : ''} ${o ? 'disabled' : ''}><span class="sc-l">${e(x.label)}</span><span class="sc-p">${S.inr(x.price)}</span>${o ? '<span class="sc-o">Sold out</span>' : ''}</label>`;
+            return `<label class="size-chip ${x.id === v.id ? 'on' : ''} ${o ? 'dis' : ''}"><input type="radio" name="size" value="${x.id}" ${x.id === v.id ? 'checked' : ''} ${o ? 'disabled' : ''}><span class="sc-l">${e(x.label)}</span><span class="sc-p">${wasNow(x)}</span>${o ? '<span class="sc-o">Sold out</span>' : ''}</label>`;
           }).join('')}</div></fieldset>` : `<p class="one-size"><span>Size</span> ${e(v.size)}</p>`}
           <p>${stockMsg}</p>
           <div class="buy-row">
             <div class="stepper" aria-label="Quantity"><button type="button" id="q-dec" aria-label="Decrease">${icon('minus')}</button><output id="q-val">${pick.qty}</output><button type="button" id="q-inc" aria-label="Increase">${icon('plus')}</button></div>
             <button class="btn primary grow" id="add" ${st === 'out' ? 'disabled' : ''}>${st === 'out' ? 'Sold out' : 'Add to cart'}</button>
           </div>
-          <a class="btn wa" href="${waLink(`Hi Dè Stories! I'd like to know more about "${p.name}" (${v.label === 'One size' ? v.size : v.label}, ${S.inr(v.price)}).`)}" target="_blank" rel="noopener">${icon('wa')} Ask about this piece on WhatsApp</a>
+          <a class="btn wa" href="${waLink(`Hi Dè Stories! I'd like to know more about "${p.name}" (${v.label === 'One size' ? v.size : v.label}, ${S.inr(S.price(v))}).`)}" target="_blank" rel="noopener">${icon('wa')} Ask about this piece on WhatsApp</a>
           <details class="more" open>
             <summary>More details</summary>
             <dl class="spec">${det.map(d => `<div><dt>${d[0]}</dt><dd>${e(d[1])}</dd></div>`).join('')}</dl>
@@ -255,7 +261,8 @@
 
   /* ---------------- Cart drawer ---------------- */
   function cartLines() { return S.db.cart.map(l => ({ ...l, hit: S.variant(l.vid) })).filter(l => l.hit); }
-  function cartTotal() { return cartLines().reduce((s, l) => s + l.hit.v.price * l.qty, 0); }
+  function cartTotal() { return cartLines().reduce((s, l) => s + S.price(l.hit.v) * l.qty, 0); }
+  function cartSavings() { return cartLines().reduce((s, l) => s + (l.hit.v.price - S.price(l.hit.v)) * l.qty, 0); }
   function renderCart() {
     const d = document.getElementById('cart-drawer');
     const lines = cartLines();
@@ -263,10 +270,10 @@
       ${lines.length ? `<ul class="cart-list">${lines.map(l => `<li>
         <img src="${e(l.hit.v.image || l.hit.p.images[0])}" alt="">
         <div class="cl-info"><a href="#p-${l.hit.p.slug}" class="cl-name">${e(l.hit.p.name)}</a><span class="cl-size">${e(l.hit.v.label === 'One size' ? l.hit.v.size : l.hit.v.label)}</span>
-          <div class="cl-row"><div class="stepper sm"><button data-dec="${l.vid}" aria-label="Decrease">${icon('minus')}</button><output>${l.qty}</output><button data-inc="${l.vid}" aria-label="Increase">${icon('plus')}</button></div><span class="cl-price">${S.inr(l.hit.v.price * l.qty)}</span></div>
+          <div class="cl-row"><div class="stepper sm"><button data-dec="${l.vid}" aria-label="Decrease">${icon('minus')}</button><output>${l.qty}</output><button data-inc="${l.vid}" aria-label="Increase">${icon('plus')}</button></div><span class="cl-price">${wasNow(l.hit.v, l.qty)}</span></div>
           <button class="link-btn" data-rm="${l.vid}">Remove</button></div>
       </li>`).join('')}</ul>
-      <div class="drawer-foot"><div class="sum-row"><span>Subtotal</span><b>${S.inr(cartTotal())}</b></div><p class="muted small">Delivery charges are confirmed on WhatsApp before dispatch.</p><a class="btn primary block-btn" href="#checkout" id="go-checkout">Checkout</a></div>`
+      <div class="drawer-foot">${cartSavings() ? `<div class="sum-row save"><span>Festive savings</span><span>−${S.inr(cartSavings())}</span></div>` : ''}<div class="sum-row"><span>Subtotal</span><b>${S.inr(cartTotal())}</b></div><p class="muted small">Delivery charges are confirmed on WhatsApp before dispatch.</p><a class="btn primary block-btn" href="#checkout" id="go-checkout">Checkout</a></div>`
       : `<div class="cart-empty"><p>Your cart is empty.</p><a class="btn ghost" href="#shop" id="cart-shop">Browse the shop</a></div>`}`;
     d.querySelector('#close-cart').onclick = closeCart;
     d.querySelectorAll('[data-inc]').forEach(b => b.onclick = () => { const l = S.db.cart.find(x => x.vid === b.dataset.inc); const h = S.variant(l.vid); if (l.qty >= h.v.stock) { UI.toast(`Only ${h.v.stock} in stock`); return; } l.qty++; S.save(); renderCart(); UI.refreshCartCount(); });
@@ -300,12 +307,13 @@
             </div>
           </fieldset>
           <div class="field"><label for="co-notes">Notes <span class="opt">optional</span></label><input id="co-notes" placeholder="Gift wrap, delivery timing…"></div>
+          <label class="consent"><input type="checkbox" id="co-consent"> <span>I agree to the <a href="#terms" target="_blank">Terms of Sale</a> and <a href="#privacy" target="_blank">Privacy Policy</a>, and to Dè Stories contacting me on WhatsApp about this order.</span></label>
           <p class="form-err" id="co-err" role="alert" hidden></p>
           <button class="btn wa block-btn" type="submit">${icon('wa')} Place order on WhatsApp</button>
           <p class="soon">Online payment by UPI and card is coming soon.</p>
         </form>
-        <aside class="summary"><h2>Order summary</h2><ul>${lines.map(l => `<li><img src="${e(l.hit.v.image || l.hit.p.images[0])}" alt=""><span><b>${e(l.hit.p.name)}</b><small>${e(l.hit.v.label === 'One size' ? l.hit.v.size : l.hit.v.label)} · Qty ${l.qty}</small></span><span class="mono">${S.inr(l.hit.v.price * l.qty)}</span></li>`).join('')}</ul>
-          <div class="sum-row"><span>Subtotal</span><b>${S.inr(cartTotal())}</b></div><div class="sum-row muted"><span>Delivery</span><span>Confirmed on WhatsApp</span></div></aside>
+        <aside class="summary"><h2>Order summary</h2><ul>${lines.map(l => `<li><img src="${e(l.hit.v.image || l.hit.p.images[0])}" alt=""><span><b>${e(l.hit.p.name)}</b><small>${e(l.hit.v.label === 'One size' ? l.hit.v.size : l.hit.v.label)} · Qty ${l.qty}</small></span><span class="mono">${wasNow(l.hit.v, l.qty)}</span></li>`).join('')}</ul>
+          ${cartSavings() ? `<div class="sum-row save"><span>Festive savings</span><span>−${S.inr(cartSavings())}</span></div>` : ''}<div class="sum-row"><span>Subtotal</span><b>${S.inr(cartTotal())}</b></div><div class="sum-row muted"><span>Delivery</span><span>Confirmed on WhatsApp</span></div></aside>
       </div>
     </main>` + footer();
   }
@@ -324,6 +332,7 @@
       if (fulfil === 'delivery' && v('co-pin') && !/^\d{6}$/.test(v('co-pin'))) errs.push('a 6-digit pincode');
       const err = document.getElementById('co-err');
       if (errs.length) { err.textContent = 'Please add ' + errs.join(', ') + '.'; err.hidden = false; return; }
+      if (!document.getElementById('co-consent').checked) { err.textContent = 'Please tick the box to agree to the Terms of Sale and Privacy Policy.'; err.hidden = false; return; }
       const o = S.placeOrder({ name: v('co-name'), phone: v('co-phone'), email: v('co-email'), fulfil, address: v('co-addr'), city: fulfil === 'pickup' ? 'Store pickup' : v('co-city'), pincode: v('co-pin'), notes: v('co-notes') }, S.db.cart);
       UI.refreshCartCount();
       location.hash = 'done-' + o.number;
@@ -332,7 +341,7 @@
   function orderMessage(o) {
     const c = S.customer(o.cid);
     return [`Hi Dè Stories! I'd like to place an order.`, ``, `Order ${o.number}`,
-      ...o.items.map((i, n) => `${n + 1}. ${i.name}${i.label !== 'One size' ? ' (' + i.label + ')' : ''} × ${i.qty} = ${S.inr(i.price * i.qty)}`),
+      ...o.items.map((i, n) => `${n + 1}. ${i.name}${i.label !== 'One size' ? ' (' + i.label + ')' : ''} × ${i.qty} = ${S.inr(i.price * i.qty)}${i.mrp && i.mrp > i.price ? ' (offer price, was ' + S.inr(i.mrp * i.qty) + ')' : ''}`),
       `Subtotal: ${S.inr(o.subtotal)}`, ``, `Name: ${c.name}`, `Phone: +91 ${c.phone}`,
       o.fulfil === 'pickup' ? `Pickup at the Experience Store` : `Deliver to: ${o.address}, ${o.city}${o.pincode ? ' ' + o.pincode : ''}`,
       o.notes ? `Notes: ${o.notes}` : ''].filter((x, i, a) => x !== '' || a[i - 1] !== '').join('\n').trim();
@@ -429,5 +438,44 @@
   }
   function bindVisit() { const b = document.getElementById('copy-wa'); if (b) b.onclick = () => UI.copy(S.db.settings.phoneDisplay, document.getElementById('wa-num')); }
 
-  window.Shop = { header, footer, icon, home, shop, bindShop, productView, bindProduct, checkout, bindCheckout, done, bindDone, studio, bindStudio, visit, bindVisit, openCart, closeCart, renderCart, filters, cartCount, logo };
+
+  /* ---------------- Policies (templates for the client to review) ---------------- */
+  const POLICIES = {
+    privacy: ['Privacy Policy', [
+      ['Who we are', 'Dè Stories (360° Design Studio), Alfa Horizon, Vallarpadam, Kochi, Kerala, runs this website. This policy explains how we handle your personal data under the Digital Personal Data Protection Act, 2023.'],
+      ['What we collect', 'When you order or ask for a consultation we collect your name, mobile number, email (optional), delivery address and what you ordered. We do not collect card or bank details; payments happen on UPI or your bank\'s own app.'],
+      ['Why we use it', 'Only to confirm and deliver your order, reply to your enquiry, contact you on WhatsApp about that order, and keep the records the law requires. We send offers only if you ask us to.'],
+      ['Who we share it with', 'Our courier partner (name, phone and address, to deliver), and the companies that host this website and its database. We never sell your data.'],
+      ['How long we keep it', 'Order records are kept for 6 years for tax purposes. Enquiries are deleted 2 years after the last contact. You can ask us to delete anything we are not required to keep.'],
+      ['Your rights', 'You can ask to see, correct or delete your data, or withdraw your consent, by messaging us on WhatsApp or emailing us. We reply within 7 working days.'],
+      ['Cookies and storage', 'The site stores your cart in your own browser so it is still there when you return. We use no advertising trackers.'],
+      ['Contact', 'Grievance contact: the store owner, on the WhatsApp number shown on this site.']
+    ]],
+    terms: ['Terms of Sale', [
+      ['Orders', 'Placing an order on this website sends us a request on WhatsApp. Your order is confirmed only when we confirm availability and receive payment.'],
+      ['Prices and offers', 'Prices are in Indian rupees. Festive offers are valid while stock lasts and may end without notice; the price shown when you place the order is the price you pay.'],
+      ['Product details', 'Many pieces are finished by hand, so colour, texture and size can vary slightly from the photos.'],
+      ['Cancellation', 'You can cancel free of charge until your order is dispatched. Once dispatched, the Shipping & Returns policy applies.'],
+      ['Liability', 'Our liability for any order is limited to the amount you paid for it.'],
+      ['Governing law', 'These terms are governed by the laws of India, with courts in Kochi, Kerala having jurisdiction.']
+    ]],
+    shipping: ['Shipping & Returns', null]
+  };
+  function policy(key) {
+    const [title, secs] = POLICIES[key];
+    const body = secs || [
+      ['Delivery', S.db.settings.delivery],
+      ['Dispatch', 'Orders are dispatched within 2 working days of payment. We share the courier name and tracking number on WhatsApp.'],
+      ['Damaged on arrival', 'Please record an unboxing video and message us within 48 hours. We will replace the piece or refund you.'],
+      ['Refunds', 'Approved refunds are paid to your original UPI or bank account within 7 working days.']
+    ];
+    return header('') + `<main id="main" class="wrap policy">
+      <p class="crumb"><a href="#home">Home</a> / ${e(title)}</p><h1>${e(title)}</h1>
+      <p class="proto-note"><b>Template for review:</b> standard wording for an Indian online decor shop. Dè Stories should confirm the details, ideally with their lawyer or CA, before launch.</p>
+      ${body.map(b => `<section><h2>${e(b[0])}</h2><p>${e(b[1])}</p></section>`).join('')}
+      <p class="muted small">Last updated ${S.fmtDate(Date.now())}</p>
+    </main>` + footer();
+  }
+
+  window.Shop = { header, footer, icon, home, shop, bindShop, productView, bindProduct, checkout, bindCheckout, done, bindDone, studio, bindStudio, visit, bindVisit, policy, openCart, closeCart, renderCart, filters, cartCount, logo };
 })();

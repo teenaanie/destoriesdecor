@@ -22,7 +22,7 @@
     catch (e) { memoryOnly = true; window.UI && UI.toast('Browser storage is full or blocked; changes will last until you close this tab.'); }
   }
   function reset() { DB = window.Seed.build(); save(); }
-  function init() { if (!load() || !DB || DB.v !== 1) reset(); }
+  function init() { if (!load() || !DB || DB.v !== 2) reset(); }
 
   /* ---------- formatting ---------- */
   const inr = n => '₹' + Math.round(n).toLocaleString('en-IN');
@@ -46,7 +46,11 @@
   }
   const visibleCats = () => DB.categories.filter(c => c.visible).sort((a, b) => a.sort - b.sort);
   const visibleProducts = () => DB.products.filter(p => p.visible && (cat(p.cat) || {}).visible !== false);
-  const priceRange = p => { const ps = p.variants.map(v => v.price); return [Math.min(...ps), Math.max(...ps)]; };
+  /* A size is on sale when it has a sale price below its regular price. */
+  const onSale = v => !!(v.sale && v.sale > 0 && v.sale < v.price);
+  const price = v => onSale(v) ? v.sale : v.price;
+  const productOnSale = p => p.variants.some(onSale);
+  const priceRange = p => { const ps = p.variants.map(price); return [Math.min(...ps), Math.max(...ps)]; };
   const totalStock = p => p.variants.reduce((s, v) => s + Math.max(0, v.stock), 0);
   const lowAt = v => v.lowAt != null ? v.lowAt : DB.settings.lowStockDefault;
   function stockState(v) { return v.stock <= 0 ? 'out' : v.stock <= lowAt(v) ? 'low' : 'ok'; }
@@ -80,7 +84,7 @@
     const c = upsertCustomer(form);
     const items = cartLines.map(l => {
       const { p, v } = variant(l.vid);
-      return { pid: p.id, vid: v.id, name: p.name, label: v.label, size: v.size, price: v.price, qty: l.qty };
+      return { pid: p.id, vid: v.id, name: p.name, label: v.label, size: v.size, price: price(v), mrp: v.price, qty: l.qty };
     });
     const o = {
       number: nextOrderNumber(), cid: c.id, status: 'pending', channel: 'website',
@@ -93,15 +97,28 @@
     save();
     return o;
   }
-  /* Status changes drive stock: confirm reduces, cancel (after confirm) restores. */
-  function setStatus(o, status) {
-    const wasCounted = COUNTED.includes(o.status);
-    if (status === 'confirmed' && !wasCounted) o.items.forEach(i => move(i.vid, -i.qty, 'order', o.number));
-    if (status === 'cancelled' && wasCounted) o.items.forEach(i => move(i.vid, +i.qty, 'cancel', o.number));
+  /* Status changes drive stock: moving into Confirmed/Dispatched/Delivered reduces it once;
+     moving back out (Cancelled, Abandoned, Pending) puts it back. */
+  const NEXT = {
+    pending: ['confirmed', 'cancelled', 'abandoned'],
+    confirmed: ['shipped', 'delivered', 'cancelled', 'pending'],
+    shipped: ['delivered', 'cancelled'],
+    delivered: [],
+    cancelled: ['pending'],
+    abandoned: ['pending', 'confirmed']
+  };
+  function setStatus(o, status, note, dispatch) {
+    const was = COUNTED.includes(o.status), now = COUNTED.includes(status);
+    if (now && !was) o.items.forEach(i => move(i.vid, -i.qty, 'order', o.number));
+    if (!now && was) o.items.forEach(i => move(i.vid, +i.qty, 'cancel', o.number));
+    if (dispatch && (dispatch.courier || dispatch.tracking)) o.dispatch = { courier: dispatch.courier || '', tracking: dispatch.tracking || '' };
     o.status = status;
-    o.history.push({ s: status, at: Date.now() });
+    o.history.push({ s: status, at: Date.now(), note: note || '', by: DB.session ? DB.session.email : '' });
     save();
   }
+  function addNote(o, note) { o.history.push({ s: 'note', at: Date.now(), note, by: DB.session ? DB.session.email : '' }); save(); }
+  const STALE_DAYS = 3;
+  const isStale = o => o.status === 'pending' && Date.now() - o.created > STALE_DAYS * DAY;
   function shortfall(o) {
     return o.items.filter(i => { const h = variant(i.vid); return h && h.v.stock - i.qty < 0; });
   }
@@ -184,8 +201,8 @@
     get db() { return DB; }, init, save, reset, DAY, COUNTED,
     inr, inrShort, fmtDate, fmtDateTime, esc, uid, slugify,
     cat, product, productBySlug, customer, order, variant, visibleCats, visibleProducts,
-    priceRange, totalStock, stockState, productStockState, lowAt, move,
-    upsertCustomer, placeOrder, setStatus, shortfall,
+    price, onSale, productOnSale, priceRange, totalStock, stockState, productStockState, lowAt, move,
+    upsertCustomer, placeOrder, setStatus, addNote, NEXT, isStale, STALE_DAYS, shortfall,
     counted, kpis, series, topProducts, categoryRevenue, topCustomers, customerStats, restockList,
     get memoryOnly() { return memoryOnly; }
   };

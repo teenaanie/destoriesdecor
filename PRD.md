@@ -74,6 +74,7 @@ This works at a small scale but has limits:
 - Large photo. A gallery is supported, though the catalog has one photo per product today.
 - Name, category, and a price that matches the selected size.
 - **Size picker:** shown when a product has more than one size. Each size is a chip showing size and price (e.g. `13 in · ₹2,000`). Choosing one updates the price, the stock message and the photo if that size has its own. Sizes that are out of stock are greyed out and can't be selected. Single-size products show the size as plain text.
+- **Sale price (optional, per size):** when set, the product page, size chips, cards, cart, checkout and WhatsApp message show the sale price with the regular price struck through, plus the saving. Cards show a "% off" badge. An **On sale** collection filter lists every product with an active offer.
 - **Stock message:** "In stock", "Only 2 left" (at or below the low-stock threshold) or "Out of stock". Add to cart is disabled when the product is out of stock.
 - **Quantity stepper:** capped at the available stock.
 - **Add to cart:** opens the cart drawer.
@@ -102,6 +103,7 @@ This works at a small scale but has limits:
   - delivery address, city and pincode
   - delivery or store pickup
   - notes
+- **Consent checkbox** (required): agree to the Terms of Sale and Privacy Policy, and to being contacted on WhatsApp about the order.
 - **Place order on WhatsApp:**
   1. Creates an order with status **Pending** and an order number (`DS-1042`).
   2. Creates or updates the **customer record**, matched by phone.
@@ -128,7 +130,11 @@ This works at a small scale but has limits:
 
   Submitting creates an **Enquiry** in the admin and shows a success state.
 
-### 5.5 Non-functional
+### 5.5 Policy pages
+- Privacy Policy (written for the Digital Personal Data Protection Act, 2023), Terms of Sale, and Shipping & Returns, linked from the footer and the checkout.
+- These are standard templates; the client should review them, ideally with a lawyer or CA.
+
+### 5.6 Non-functional
 - Mobile-first, working from 360px wide upward. Product photos load lazily.
 - Look and feel follow the brand: sage/khaki, deep wood brown, serif wordmark, script accent.
 - Accessible: text contrast at WCAG AA or better, visible keyboard focus, labelled form fields, alt text on photos.
@@ -168,6 +174,7 @@ This works at a small scale but has limits:
   - name, category (dropdown, including the categories the owner adds), and tags (room, collections)
   - photo: upload, held as a data URL in the prototype; main image plus extras
   - **sizes / variants:** one or more rows of size label, price, stock, SKU and an optional photo. Rows can be added and removed.
+  - an optional **sale price** per size, which must be lower than the regular price; clearing it ends the offer
   - "More details" fields: description, material, weight, care
   - Visible and Featured switches
 - Duplicate a product. Delete it after an inline confirmation.
@@ -188,16 +195,15 @@ This works at a small scale but has limits:
 - If confirming an order would take stock below zero, the admin shows a warning and lets the owner confirm anyway (the shop may have unlisted stock) or cancel.
 
 ### 6.6 Orders
-- List: order number, date, customer, number of items, total, status pill, and channel (Website/WhatsApp).
-- Filter by status and search.
-- **Order detail:** line items, customer and address, notes, and a status timeline.
-- **Actions:**
-  - **Confirm** (reduces stock)
-  - **Mark shipped**
-  - **Mark delivered**
-  - **Cancel** (restores stock if it was already reduced)
-  - **Message on WhatsApp** (opens a chat with the customer)
-- Status flow: Pending → Confirmed → Shipped → Delivered. Cancelled can be reached from any status before Delivered.
+- **List:** order number, date, customer, number of items, total, status pill, and channel (Website/WhatsApp). Filter by status and search. Pending orders older than 3 days show a **No reply 3+ days** flag, and the dashboard counts them.
+- **Statuses:** Pending → Confirmed → Dispatched → Delivered, plus **Cancelled** and **Abandoned**. Abandoned is for orders where the customer never sent the WhatsApp message or stopped replying.
+- **Update status panel:** the owner picks the next step, and only valid next steps are offered. Each change can carry a **note**, and a hint says whether stock will change. Choosing **Dispatched** asks for courier name and tracking number.
+- **Stock rules:** moving into Confirmed reduces stock once. Moving a confirmed or dispatched order to Cancelled (or back to Pending) restores it. Abandoned and cancelled-before-payment orders never touch stock.
+- **Add note:** a note can be added without changing status (e.g. "Customer will pay on Friday").
+- **Edit order:** customer name, phone, email, delivery/pickup, address, pincode and customer notes. Item quantities can be changed and items removed only while the order is Pending, before stock is reduced. Each edit is logged.
+- **Timeline:** every status change, note and edit, newest first, with time and who made it.
+- **Message customer on WhatsApp** button.
+- Not in scope: courier integration, shipping labels and automatic tracking updates to customers.
 
 ### 6.7 Customers
 - Customers are created from checkout, matched by phone number.
