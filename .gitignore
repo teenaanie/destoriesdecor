@@ -3,3 +3,4 @@ Documents/
 .claude/
 .vercel
 .DS_Store
+.env*
