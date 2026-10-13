@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dè Stories Decor</title>
+<meta name="description" content="Curated home decor from Dè Stories, Kochi: figurines, planters, vases and keepsakes, plus 360° interior design.">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath d='M24 3a21 21 0 1 0 13.6 37l6.4 5-1.6-8A21 21 0 0 0 24 3z' fill='%236b4129'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&family=Instrument+Sans:wght@400;500;600;700&family=Caveat:wght@500;600&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="demo-bar" id="demo-bar">
+  <span class="demo-tag">Prototype</span>
+  <nav class="demo-switch" aria-label="Prototype views">
+    <a href="#home" data-view="shop">Customer site</a>
+    <a href="#admin" data-view="admin">Owner admin</a>
+  </nav>
+</div>
+
+<div id="app"></div>
+
+<div class="drawer-scrim" id="scrim" hidden></div>
+<aside class="drawer" id="cart-drawer" aria-label="Your cart" hidden></aside>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="data/catalog.js"></script>
+<script src="js/store.js"></script>
+<script src="js/seed.js"></script>
+<script src="js/shop.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

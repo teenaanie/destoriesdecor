@@ -1,0 +1,5 @@
+# Client source material stays local
+Documents/
+.claude/
+.vercel
+.DS_Store
